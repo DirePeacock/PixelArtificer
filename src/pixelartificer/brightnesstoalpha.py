@@ -14,9 +14,13 @@ import logging
 #     "D:\\pics\\reference\\trythis\\sprites\\loopHeroPortraits_trans.png"
 # )
 test_img = pathlib.Path(
-    "D:\\files\\cod\\cool_cli_stuff\\quickies\\pixelart\\_test_images\\piano_brackets_drow.png"
+    "D:\\files\\cod\\PixelArtificer\\src\\pixelartificer\\_test_images\\piano_brackets_drow.png"
 )
-
+default_process_count = 16
+default_cutoff_percentile = 0.66
+default_gradient_selection = 0.3
+default_darkening_factor = 0.4
+default_contrast_selection_factor = 0.6
 
 class Rectangle():
     def __init__(self, x,y,w,h):
@@ -38,7 +42,7 @@ class Rectangle():
         return cls(int(x), int(y), int(w), int(h))
 
 class ParallelPixelProcessor():
-    def __init__(self, pxl_func=None, num_processes=16, mode="RGBA"):
+    def __init__(self, pxl_func=None, num_processes=default_process_count, mode="RGBA"):
         self.pxl_func = pxl_func if pxl_func is not None else self.do_nothing
         self.num_processes = num_processes
         self.mode = mode
@@ -109,14 +113,13 @@ class ParallelPixelProcessor():
         target_dict[rect.key] = sub_image
 
 
-    def combine_image(self, new_image,  return_dict):
+    def combine_image(self, new_image, return_dict):
         for key, sub_image in return_dict.items():
             rect = Rectangle.from_key(key)
             x,y = rect.x, rect.y
             new_image.paste(sub_image, (x,y))
         return new_image
-
-
+    
     def do_nothing(self, pxl):
         return pxl     
         
@@ -131,30 +134,38 @@ class ParallelPixelProcessor():
 # check the gradient stuff
 # maybe change selection to use pencilyness of a pixel to set alpha
 # pencilyness 
-#   is hue differenece from paper color
-#   lightness
+#   uses hue differenece from paper color
+#   lightness & saturation
 class SketchExtractor(ParallelPixelProcessor):
-    def __init__(self, image, output=None, pxl_func=None, num_processes=16, mode="RGBA", contrast_factor=0.6, cut_off_percentile=0.7, darkening_factor=0.4, cutoff_gradient=0.3):
+    def __init__(self, 
+                 image, 
+                 output=None, 
+                 pxl_func=None, 
+                 num_processes=default_process_count, 
+                 mode="RGBA", 
+                 contrast_factor=default_contrast_selection_factor, 
+                 cut_off_percentile=default_cutoff_percentile, 
+                 darkening_factor=default_darkening_factor, 
+                 cutoff_gradient=default_gradient_selection):
         self.image = image
         self.output = output
-        self.contrast_factor = 0.6
-        self.cut_off_percentile = 0.6
-        self.darkening_factor = 0.4
-        self.cutoff_gradient = 0.3
+        self.contrast_factor = contrast_factor
+        self.cut_off_percentile = cut_off_percentile
+        self.darkening_factor = darkening_factor
+        self.cutoff_gradient = cutoff_gradient
         self.paper_lightness_cutoff_value = 0.65
         super().__init__(pxl_func, num_processes, mode)
 
-    # TODO    
+    # unused
     def determine_paper_color(self, paper_dict):
         """ 
         track things about paper colors by pixels above the lightness cutoff
         median of things above the lightness cutoff maybe?
         """
-        paper_color = [0,0,0,0]
-        
+        paper_color = [0,0,0,0]    
         self.paper_color = (int(i) for i in paper_color)
     
-    # TODO
+    # unused
     def determine_pencilyness(self, rgba):
         # based on how different the things are from the paper color
         hsv = colorsys.rgb_to_hsv(*rgba[:3])
@@ -169,7 +180,6 @@ class SketchExtractor(ParallelPixelProcessor):
             stores those values to make a percentile for the alpha
             set the alpha to 0 for all pixels below that percentile
         """
-        
         hc_image = ImageEnhance.Contrast(input_img).enhance(1.0+self.contrast_factor)
         rects = self.split_into_rectangles(input_img, num_processes)
         collection_processes = []
@@ -214,7 +224,7 @@ class SketchExtractor(ParallelPixelProcessor):
             if pixels_found > pixels_to_find_cutoff:
                 cutoff_value = i
                 break
-        print(f"cut off value: {cutoff_value}")
+        
         selection_processes = []
         for rect in rects:
             selection_processes.append(
@@ -267,16 +277,6 @@ class SketchExtractor(ParallelPixelProcessor):
         target_dict[rect.key] = sub_image
 
     
-    def combine_image(self, new_image,  return_dict):        
-        for key, sub_image in return_dict.items():
-            rect = Rectangle.from_key(key)
-            x,y = rect.x, rect.y
-            # paste sub_image into new_image
-            new_image.paste(sub_image, (x,y))
-        # new_image.show()
-        return new_image
-
-    
     @staticmethod
     def brightness_to_opacity(rgba):
         """ gets brightness from rgba tuple
@@ -317,7 +317,6 @@ class SketchExtractor(ParallelPixelProcessor):
     
     def test_gradient(self):
         rgba_list = [ ]
-        expected_output = [ ]
         for i in range(0,10):
             lightness = i/10
             j=int(255*lightness)
@@ -361,6 +360,7 @@ class SketchExtractor(ParallelPixelProcessor):
         
 
 class AlphaExtractor():
+    """this one just does the brightness to transparency thing"""
     def __init__(self, image, output=None, mode="RGBA"):
         self.image = image
         self.output = output
@@ -372,9 +372,12 @@ class AlphaExtractor():
         determine V value from HSV for that value
         return RGBA with that value as alpha
         """
-        hsv = colorsys.rgb_to_hsv(*rgba[:3])
-        rgba2 = rgba[:3] + (hsv[2],)
-        return rgba2
+        colorsys_rgba = tuple(rgba[i]/255 for i in range(3))
+        hls = colorsys.rgb_to_hls(*colorsys_rgba[:3])
+        darkness = 1.0 - hls[1]
+        rgba2 = rgba[:3] + (darkness*255,)
+        return tuple(int(i) for i in rgba2)
+    
     
     def do_main(self):
         """open image"""
@@ -391,12 +394,12 @@ class AlphaExtractor():
 def main(args):
     print(__file__, args.__dict__)
     _output = args.output
-    suffix = "_alpha.png" if not args.sketch_extractor else "_extracted.png"
+    suffix = "_alpha.png" if args.just_opacity else "_extracted.png"
     if _output is None:
-        _output = os.path.splitext(args.image)[0] + "_alpha.png"
-    if args.sketch_extractor:
+        _output = os.path.splitext(args.image)[0] + suffix
+    if not args.just_opacity:
         runner = SketchExtractor(
-            image=args.image, output=_output)
+            image=args.image, output=_output, )
         runner.do_main()
     else:
         runner = AlphaExtractor(
@@ -413,6 +416,7 @@ def test_brightness():
     for rgba in rgba_list:
         print(rgba, SketchExtractor.brightness_to_opacity(rgba))
 
+
 def parse_args(args_):
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -423,10 +427,41 @@ def parse_args(args_):
         help="image path to apply palette to",
     )
     parser.add_argument(
-        "-r", "--rgb", default=False, action="store_true", help="use rgb instead of hsv"
+        "--just-opacity", dest='just_opacity', default=False, action="store_true", help="use settings for sketch extractor"
     )
     parser.add_argument(
-        "-s", "--sketch-extractor", default=True, action="store_true", help="use settings for sketch extractor"
+        "--process-count",
+        type=float,
+        default=default_process_count,
+        help="number of processes to use",
+    )
+    parser.add_argument(
+        "-p",
+        "--percentile",
+        type=float,
+        default=default_cutoff_percentile,
+        help="the percitile of the darkes pixels to keep",
+    )
+    parser.add_argument(
+        "-g",
+        "--gradient-selection",
+        type=float,
+        default=default_gradient_selection,
+        help="keeps some extra pixels below the cutoff at a lower opacity",
+    )
+    parser.add_argument(
+        "-d",
+        "--darkening-factor",
+        type=float,
+        default=default_darkening_factor,
+        help="darkens the RGB of pixels that are kept",
+    )
+    parser.add_argument(
+        "-c",
+        "--contrast-selection-factor",
+        type=float,
+        default=default_contrast_selection_factor,
+        help="keeps some extra pixels below the cutoff at a lower opacity",
     )
     parser.add_argument(
         "-o",
