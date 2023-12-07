@@ -2,6 +2,7 @@
 import os
 from PIL import Image
 from PIL import ImageEnhance
+from PIL import ImageFilter
 import pathlib
 import sys
 import argparse
@@ -14,14 +15,17 @@ import logging
 #     "D:\\pics\\reference\\trythis\\sprites\\loopHeroPortraits_trans.png"
 # )
 test_img = pathlib.Path(
-    "D:\\files\\cod\\PixelArtificer\\src\\pixelartificer\\_test_images\\piano_brackets_drow.png"
+    "D:\\pics\\analogsketches\\piano_brackets_drow.png"
 )
-default_process_count = 16
+default_process_count = 8 
 default_cutoff_percentile = 0.66
-default_gradient_selection = 0.3
+default_gradient_selection = 0.6
 default_darkening_factor = 0.4
 default_contrast_selection_factor = 0.6
-
+default_blur_radius=None
+default_blur_opacity=0.2
+# if not passed use this percent of the image width
+default_blur_radius_percent=0.01
 class Rectangle():
     def __init__(self, x,y,w,h):
         self.x=x
@@ -146,7 +150,9 @@ class SketchExtractor(ParallelPixelProcessor):
                  contrast_factor=default_contrast_selection_factor, 
                  cut_off_percentile=default_cutoff_percentile, 
                  darkening_factor=default_darkening_factor, 
-                 cutoff_gradient=default_gradient_selection):
+                 cutoff_gradient=default_gradient_selection, 
+                 blur_radius=default_blur_radius,
+                 blur_opacity=default_blur_opacity):
         self.image = image
         self.output = output
         self.contrast_factor = contrast_factor
@@ -154,24 +160,10 @@ class SketchExtractor(ParallelPixelProcessor):
         self.darkening_factor = darkening_factor
         self.cutoff_gradient = cutoff_gradient
         self.paper_lightness_cutoff_value = 0.65
+        self.blur_radius = blur_radius
+        self.blur_opacity = blur_opacity
         super().__init__(pxl_func, num_processes, mode)
 
-    # unused
-    def determine_paper_color(self, paper_dict):
-        """ 
-        track things about paper colors by pixels above the lightness cutoff
-        median of things above the lightness cutoff maybe?
-        """
-        paper_color = [0,0,0,0]    
-        self.paper_color = (int(i) for i in paper_color)
-    
-    # unused
-    def determine_pencilyness(self, rgba):
-        # based on how different the things are from the paper color
-        hsv = colorsys.rgb_to_hsv(*rgba[:3])
-        determined_pencilyness = 0
-        pass
-    
     def main_loop(self, input_img, num_processes):
         """same as the old one with some extra parts
         NEW:
@@ -184,6 +176,10 @@ class SketchExtractor(ParallelPixelProcessor):
         rects = self.split_into_rectangles(input_img, num_processes)
         collection_processes = []
         
+        if self.blur_radius is None:
+            self.blur_radius = default_blur_radius_percent * (input_img.width + input_img.height) / 2
+
+
         # oh yeah baby use all that space for dicts and arrays
         # we got plenty of flops and bits to spare
         return_dict = multiprocessing.Manager().dict()
@@ -200,6 +196,8 @@ class SketchExtractor(ParallelPixelProcessor):
                 )
             )
         
+        print(f"step 1:\t Collecting img info")
+
         for process in collection_processes:
             process.start()
         for process in collection_processes:
@@ -225,6 +223,8 @@ class SketchExtractor(ParallelPixelProcessor):
                 cutoff_value = i
                 break
         
+        print(f"step 2:\t Processing image")
+
         selection_processes = []
         for rect in rects:
             selection_processes.append(
@@ -238,13 +238,37 @@ class SketchExtractor(ParallelPixelProcessor):
         for process in selection_processes:
             process.join()
 
+        print(f"step 3:\t Combining image")
+
         # new image of the same size
         new_image = Image.new(input_img.mode, input_img.size)
         self.combine_image(new_image, return_dict)
         
+        
+        if self.blur_radius > 0 and self.blur_opacity > 0:
+            print(f"step 4:\tb lurring image")
+            new_image = self.blur_image(new_image, self.blur_radius, self.blur_opacity)
+        
         return new_image
     
-    
+    def blur_image(self, image, blur_radius, blur_opacity):
+        """blur image"""
+        image = image
+
+        if blur_radius > 0 and blur_opacity > 0:
+            blurred_image = image.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+            
+            # create new blank image of the same size
+            blank_image = Image.new(image.mode, image.size, (0,0,0,0))
+
+            # blend blurred image 
+            blurred_image = Image.blend(image, blurred_image, blur_opacity)
+
+            # paste blurred image into blank image
+            image = Image.alpha_composite(image, blurred_image)
+
+        return image
+      
 
     def sub_loop_collection(self, input_img, intermediate_image, rect, target_dict, value_dict):
         """make a new image in the rectangle
@@ -399,7 +423,15 @@ def main(args):
         _output = os.path.splitext(args.image)[0] + suffix
     if not args.just_opacity:
         runner = SketchExtractor(
-            image=args.image, output=_output, )
+            image=args.image, 
+            output=_output, 
+            contrast_factor=args.contrast_selection_factor,
+            cut_off_percentile=args.percentile,
+            darkening_factor=args.darkening_factor,
+            cutoff_gradient=args.gradient_selection,
+            blur_radius=args.blur_radius,
+            blur_opacity=args.blur_opacity
+            )
         runner.do_main()
     else:
         runner = AlphaExtractor(
@@ -462,6 +494,18 @@ def parse_args(args_):
         type=float,
         default=default_contrast_selection_factor,
         help="keeps some extra pixels below the cutoff at a lower opacity",
+    )
+    parser.add_argument(
+        "--blur-radius",
+        type=int,
+        default=default_blur_radius,
+        help="radius of blur effect",
+    )
+    parser.add_argument(
+        "--blur-opacity",
+        type=float,
+        default=default_blur_opacity,
+        help="opacity of blurred layer added",
     )
     parser.add_argument(
         "-o",
