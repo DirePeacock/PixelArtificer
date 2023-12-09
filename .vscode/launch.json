@@ -11,6 +11,19 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "justMyCode": true
-        }
+        },
+        {
+            "name": "brightnesstoalpha-debug",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/pixelartificer/brightnesstoalpha.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": [
+                "-i",
+                "${workspaceFolder}/test/_test_images/piano_brackets_drow.png"
+            ]
+        },
+        
     ]
 }
