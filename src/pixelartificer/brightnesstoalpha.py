@@ -125,7 +125,7 @@ class ExtractorDemo():
             blur_opacity=args_dict["blur_opacity"]
         )
         print("\nlaunching sketch extractor\n".upper())
-        new_img = runner.main_loop(Image.open(self.image), runner.num_processes)
+        new_img = runner.main_loop(Image.open(self.image).convert("RGBA"), runner.num_processes)
         new_img.save(self.output)
         print(f"saved to {self.output}")
 

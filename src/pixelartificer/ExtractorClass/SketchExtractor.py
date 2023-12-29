@@ -2,6 +2,7 @@ import os
 from PIL import Image
 from PIL import ImageEnhance
 from PIL import ImageFilter
+from PIL import ImageOps
 import pathlib
 import sys
 import argparse
@@ -31,7 +32,8 @@ class SketchExtractor(ParallelPixelProcessor):
                  darkening_factor=Defaults.default_darkening_factor, 
                  cutoff_gradient=Defaults.default_gradient_selection, 
                  blur_radius=Defaults.default_blur_radius,
-                 blur_opacity=Defaults.default_blur_opacity):
+                 blur_opacity=Defaults.default_blur_opacity,
+                 use_edge_detection=True):
         self.image = image
         self.output = output
         self.contrast_factor = contrast_factor
@@ -40,7 +42,43 @@ class SketchExtractor(ParallelPixelProcessor):
         self.cutoff_gradient = cutoff_gradient
         self.blur_radius = blur_radius
         self.blur_opacity = blur_opacity
+        self.use_edge_detection = use_edge_detection
         super().__init__(pxl_func, num_processes, mode)
+
+    def edge_detection(self, input_img):
+        """use edge detection to find edges
+        return an image that is darker around areas of contrast"""
+        _img = input_img.convert("L")
+ 
+        # Calculating Edges using the passed laplacian Kernel
+        # idk how to modify these values to change anything but whatever
+        final = _img.filter(ImageFilter.Kernel((3, 3), 
+                                               (-1, -1, -1,
+                                                -1, 8, -1, 
+                                                -1, -1, -1), 
+                                                1, 0))
+        
+        final = ImageOps.invert(final)
+        final = self.image_denoise(final, passes=2)
+
+        return final
+    
+    def image_denoise(self, input_img, passes=1):
+        "use filter to get an image that is less noisy from the paper"
+        # this blur radius is 0.02 of image shortest side
+        blur_radius = int(min(input_img.width, input_img.height) * 0.02)
+        retval = ImageEnhance.Contrast(input_img).enhance(2)
+        for i in range(passes):    
+            
+            retval = retval.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+            retval = retval.filter(ImageFilter.MinFilter(3))
+            retval = retval.filter(ImageFilter.MaxFilter)
+            retval = retval.filter(ImageFilter.MedianFilter(3))
+            #increase contrast
+            retval = ImageEnhance.Contrast(retval).enhance(1.2)
+            
+        return retval
+    
 
     def main_loop(self, input_img, num_processes):
         """same as the old one with some extra parts
@@ -51,6 +89,12 @@ class SketchExtractor(ParallelPixelProcessor):
             set the alpha to 0 for all pixels below that percentile
         """
         hc_image = ImageEnhance.Contrast(input_img).enhance(1.0+self.contrast_factor)
+
+        edge_detection_image = self.edge_detection(hc_image)
+        edge_detection_image = edge_detection_image.convert("HSV")
+        # edge_detection_image.show()
+        # print("edge detection done")
+        # exit(0)
         rects = self.split_into_rectangles(input_img, num_processes)
         collection_processes = []
         
@@ -70,7 +114,7 @@ class SketchExtractor(ParallelPixelProcessor):
         for rect in rects:
             collection_processes.append(
                 multiprocessing.Process(
-                    target=self.sub_loop_collection, args=(input_img, hc_image, rect, return_dict, value_dict)
+                    target=self.sub_loop_collection, args=(input_img, hc_image, rect, return_dict, value_dict, edge_detection_image)
                 )
             )
         
@@ -147,8 +191,25 @@ class SketchExtractor(ParallelPixelProcessor):
 
         return image
       
+    def get_edge_detection_multiplier(self, ed_pxl):
+        """this is to add a modifier to the darkness of the original image
+        
+        """    
+        if not self.use_edge_detection:
+            return 1.0
+        
+        edgyness = 1.0 - ed_pxl[2]/255
+        min_edgyness = 0.0
+        mid_edgyness = 0.23
+        multiplier_magnitude = 0.7
+        
+        multiplier = 1.0
+        if edgyness >= min_edgyness:
+            multiplier = 1.0 + multiplier_magnitude * (edgyness - mid_edgyness)
 
-    def sub_loop_collection(self, input_img, intermediate_image, rect, target_dict, value_dict):
+        return multiplier
+
+    def sub_loop_collection(self, input_img, intermediate_image, rect, target_dict, value_dict, ed_image):
         """make a new image in the rectangle
         return that value"""
         sub_image=Image.new(input_img.mode, (rect.w, rect.h))
@@ -157,6 +218,13 @@ class SketchExtractor(ParallelPixelProcessor):
             for y in range(rect.y, rect.y+rect.h):
                 _x, _y = x-rect.x, y-rect.y
                 pixel = self.brightness_to_opacity(intermediate_image.getpixel((x, y)))
+                
+                ed_image_pixel_hsv = ed_image.getpixel((x, y))
+                ed_modifier = self.get_edge_detection_multiplier(ed_image_pixel_hsv)
+                new_alpha = int(pixel[3] * ed_modifier)
+                new_alpha = max(0, min(new_alpha, 255))
+                pixel = tuple([pixel[0], pixel[1], pixel[2], new_alpha])
+
                 tmp_value_dict[pixel[3]] += 1
                 sub_image.putpixel((_x, _y), pixel)
         

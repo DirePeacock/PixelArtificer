@@ -21,9 +21,23 @@
             "justMyCode": true,
             "args": [
                 "-i",
-                "${workspaceFolder}/test/_test_images/piano_brackets_drow.png"
+                "/d/pics/analogsketches/trunksfit_drow.jpg",
+                // "${workspaceFolder}/test/_test_images/piano_brackets_drow.png"
             ]
         },
+        {
+            "name": "pytest",
+            "type": "python",
+            "request": "launch",
+            "module": "pytest",
+            "console": "integratedTerminal",
+            "args": [
+                "${workspaceFolder}/test",
+                "-s",
+                // "-x"
+            ]
+        },
+        
         
     ]
 }
