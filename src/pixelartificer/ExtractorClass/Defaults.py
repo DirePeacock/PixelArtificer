@@ -12,3 +12,8 @@ default_blur_radius=None
 default_blur_opacity=0.2
 # if not passed use this percent of the image width
 default_blur_radius_percent=0.01
+
+# for using edge detection
+default_min_edgyness = 0.0
+default_mid_edgyness = 0.23
+default_multiplier_magnitude = 0.7

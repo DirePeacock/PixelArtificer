@@ -43,6 +43,10 @@ class SketchExtractor(ParallelPixelProcessor):
         self.blur_radius = blur_radius
         self.blur_opacity = blur_opacity
         self.use_edge_detection = use_edge_detection
+        self.min_edgyness = Defaults.default_min_edgyness
+        self.mid_edgyness = Defaults.default_mid_edgyness
+        self.multiplier_magnitude = Defaults.default_multiplier_magnitude
+        
         super().__init__(pxl_func, num_processes, mode)
 
     def edge_detection(self, input_img):
@@ -199,10 +203,12 @@ class SketchExtractor(ParallelPixelProcessor):
             return 1.0
         
         edgyness = 1.0 - ed_pxl[2]/255
-        min_edgyness = 0.0
-        mid_edgyness = 0.23
-        multiplier_magnitude = 0.7
         
+        min_edgyness = self.min_edgyness
+        mid_edgyness =  self.mid_edgyness
+        multiplier_magnitude = self.multiplier_magnitude
+        
+
         multiplier = 1.0
         if edgyness >= min_edgyness:
             multiplier = 1.0 + multiplier_magnitude * (edgyness - mid_edgyness)
